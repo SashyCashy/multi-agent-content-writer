@@ -57,11 +57,17 @@ def _classify_failure(exc: Exception) -> str:
                   in a minute usually DOES help, and another model may be fine.
       "error"     anything else: a real bug worth surfacing as a 500.
     """
-    text = str(exc)
+    text = f"{type(exc).__name__}: {exc}"
     lower = text.lower()
     if "RESOURCE_EXHAUSTED" in text or "429" in text or "quota" in lower:
         return "quota"
-    if "UNAVAILABLE" in text or "503" in text or "high demand" in lower or "overloaded" in lower:
+    if any(m in text for m in ("UNAVAILABLE", "503", "500", "INTERNAL")) or any(
+        m in lower for m in ("high demand", "overloaded", "try again later")
+    ):
+        return "overload"
+    # A timeout is the client giving up on a model that never answered — for the
+    # visitor that is indistinguishable from overload, and the advice is the same.
+    if any(m in lower for m in ("timeout", "timed out", "deadline", "readtimeout")):
         return "overload"
     return "error"
 
@@ -114,9 +120,14 @@ def chat(req: ChatRequest) -> JSONResponse:
             )
 
         logger.exception("Graph run failed")
+        detail = f"{type(exc).__name__}: {exc}"[:400]
         return JSONResponse(
             status_code=500,
-            content={"error": "failed", "reply": f"Something went wrong: {type(exc).__name__}"},
+            content={
+                "error": "failed",
+                "reply": "Something went wrong. Details below — please report if it persists.",
+                "detail": detail,
+            },
         )
 
     route = result.get("route", "")
@@ -260,7 +271,7 @@ PAGE = """<!doctype html>
         body: JSON.stringify({ message: text, session_id: sid }),
       });
       const j = await r.json();
-      pending.textContent = j.reply || "No response.";
+      pending.textContent = (j.reply || "No response.") + (j.detail ? "\n\n" + j.detail : "");
       if (j.route) pending.previousSibling.innerHTML = "Assistant" + '<span class="badge">' + j.route + "</span>";
     } catch (err) {
       pending.textContent = "Network error — please try again.";
