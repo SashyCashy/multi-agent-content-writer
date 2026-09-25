@@ -262,6 +262,40 @@ and re-runnable.
 
 ---
 
+## Deploying
+
+The CLI is the primary interface; `src/web.py` adds an HTTP one for hosting.
+
+```bash
+uvicorn src.web:app --reload --port 8080     # local, then open localhost:8080
+```
+
+Three endpoints: `GET /` (the page), `POST /chat`, `GET /health` (probe, makes no
+model call).
+
+**It is FastAPI, not Gradio, on purpose.** Cloud Run bills by vCPU-seconds while a
+request is open, and Gradio holds a websocket for as long as the tab is open — an
+idle visitor would consume the free allowance doing nothing. Plain HTTP POSTs only
+burn CPU while the graph actually runs.
+
+**Each browser gets its own `thread_id`.** The page generates a session id in
+`localStorage` and sends it with every request, so visitors don't share one
+conversation. On the CLI the id is per process; here it's per browser.
+
+**Quota exhaustion returns a 429 with a readable message** rather than a stack
+trace, since the free Gemini tier runs out most days.
+
+Container build uses `requirements-prod.txt`, which drops `pytest`, `grandalf`,
+and the optional OpenAI fallback — Artifact Registry's free tier is 0.5 GB.
+
+```bash
+docker build -t macw . && docker run -p 8080:8080 --env-file .env macw
+```
+
+Set `GOOGLE_API_KEY` and `TAVILY_API_KEY` as the host's secrets, never in the image.
+
+---
+
 ## Documentation
 
 | File | What it covers |

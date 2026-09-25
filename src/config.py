@@ -65,9 +65,15 @@ ROUTER_MODEL = os.environ.get("ROUTER_MODEL", "gemini-3.1-flash-lite")
 # search-backend check below and the guard in tools.py both work correctly.
 openai_client = None
 if OPENAI_API_KEY:
-    from openai import OpenAI
+    try:
+        from openai import OpenAI
 
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    except ImportError:
+        # The production image (requirements-prod.txt) omits the openai package,
+        # since Tavily is the search backend there. A stray OPENAI_API_KEY in the
+        # environment must not crash startup.
+        logger.warning("OPENAI_API_KEY is set but the openai package is not installed — ignoring.")
 
 # Writers: creative, so a warmer temperature and plenty of output room.
 # NOTE: gemini-3.x uses fixed sampling defaults and IGNORES temperature,

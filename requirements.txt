@@ -21,3 +21,7 @@ pydantic>=2.0
 
 # ── Testing ──────────────────────────────────────────────────
 pytest>=8.0
+
+# ── Web server (hosted deployment) ───────────────────────────
+fastapi>=0.115
+uvicorn>=0.30
