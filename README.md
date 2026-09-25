@@ -304,6 +304,54 @@ Set `GOOGLE_API_KEY` and `TAVILY_API_KEY` as the host's secrets, never in the im
 
 ---
 
+## Troubleshooting
+
+**Run this first.** It talks straight to the Gemini API, skipping every layer of
+the app, so it tells you whether the problem is yours at all:
+
+```bash
+python scripts/check_models.py          # the candidate models
+python scripts/check_models.py --all    # everything the key exposes
+```
+
+```
+QUOTA  gemini-3.6-flash        daily cap spent  cap=20/day — resets tomorrow  <- WRITER_MODEL
+OK     gemini-3-flash-preview  1.6s  tools=yes
+BUSY   gemini-3.5-flash        Google capacity, not your quota — retry shortly
+```
+
+Free-tier models fail in two ways that look identical from inside the app but need
+opposite responses:
+
+| Status | Meaning | What to do |
+|---|---|---|
+| `QUOTA` (429) | The ~20/day cap for that model is spent | Switch `WRITER_MODEL`; it resets tomorrow |
+| `BUSY` (503) | Google's capacity, not your quota | Wait a few minutes; nothing to fix |
+
+Switching models needs no code change or redeploy — both are read from the
+environment:
+
+```bash
+WRITER_MODEL=gemini-3-flash-preview python -m src.main --query "hi"
+
+gcloud run services update multi-agent-content-writer \
+  --region=asia-south1 --update-env-vars WRITER_MODEL=gemini-3-flash-preview
+```
+
+**A hanging request** used to mean a 503 being retried six times against
+`timeout=None`. `config.py` now sets explicit timeouts and `max_retries=1`, so a
+sick model fails in under two minutes with a readable message instead.
+
+**Deployed app failing?** `GET /health` makes no model call, so it separates "did
+the container start" from "does the model work". If `/health` is fine and `/chat`
+is not, it's the model — run the script above. For the container's own logs:
+
+```bash
+gcloud run services logs read multi-agent-content-writer --region=asia-south1 --limit=50
+```
+
+---
+
 ## Documentation
 
 | File | What it covers |
