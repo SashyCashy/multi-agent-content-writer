@@ -118,6 +118,46 @@ def test_route_decision_falls_back_when_route_missing():
     assert route_decision({}) == "general_handler"
 
 
+# ── Served page (offline) ────────────────────────────────────
+
+def test_page_javascript_has_no_unterminated_strings():
+    """Guard the served page's inline JS against broken string literals.
+
+    A single unterminated string is a SyntaxError that disables the ENTIRE
+    <script> block — the page still renders, so it looks fine, but nothing
+    works: no button handlers, no fetch, no output. It shipped once, caused by
+    a "\\n" escape being interpreted by the Python string holding the page
+    rather than surviving into the JavaScript.
+
+    Checking that quotes balance per line catches it: the bug left a line
+    ending mid-string.
+    """
+    import re
+
+    from src.web import PAGE
+
+    script = re.search(r"<script>(.*?)</script>", PAGE, re.S)
+    assert script, "no <script> block found in the page"
+
+    for lineno, line in enumerate(script.group(1).splitlines(), 1):
+        code = line.split("//", 1)[0]  # strip trailing comments
+        for quote in ('"', "'"):
+            # Ignore escaped quotes; every real one must be paired on its own line.
+            count = len(re.findall(r'(?<!\\)' + quote, code))
+            assert count % 2 == 0, (
+                f"unbalanced {quote} on script line {lineno}: {line.strip()!r}"
+            )
+
+
+def test_page_renders_and_posts_to_chat():
+    """The page must exist, be non-trivial, and wire itself to POST /chat."""
+    from src.web import PAGE
+
+    assert len(PAGE) > 2000, "page suspiciously small"
+    assert '"/chat"' in PAGE, "page never calls the /chat endpoint"
+    assert "session_id" in PAGE, "page must send a session_id so visitors get separate threads"
+
+
 # ═══════════════════════════════════════════════════════════
 #  TIER 2 — live routing (opt-in: 1 model call per case)
 # ═══════════════════════════════════════════════════════════

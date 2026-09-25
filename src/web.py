@@ -140,7 +140,7 @@ def chat(req: ChatRequest) -> JSONResponse:
     )
 
 
-PAGE = """<!doctype html>
+PAGE = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -193,6 +193,9 @@ PAGE = """<!doctype html>
   }
   button:disabled { opacity:.5; cursor:not-allowed; }
   footer { margin-top:32px; color:var(--muted); font-size:.78rem; }
+  .detail { margin-top:10px; padding:8px 10px; border-radius:8px; background:var(--bg);
+            border:1px solid var(--line); color:var(--muted);
+            font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
   a { color:var(--accent); }
 </style>
 </head>
@@ -249,7 +252,7 @@ PAGE = """<!doctype html>
     d.appendChild(head); d.appendChild(body);
     log.appendChild(d);
     d.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    return body;
+    return d;
   }
 
   document.querySelectorAll(".hint").forEach(h =>
@@ -263,7 +266,8 @@ PAGE = """<!doctype html>
     add("You", text);
     input.value = "";
     btn.disabled = true;
-    const pending = add("Assistant", "Thinking… the agent may call a few tools first.");
+    const card = add("Assistant", "Thinking… the agent may call a few tools first.");
+    const pbody = card.querySelector(".body");
     try {
       const r = await fetch("/chat", {
         method: "POST",
@@ -271,10 +275,18 @@ PAGE = """<!doctype html>
         body: JSON.stringify({ message: text, session_id: sid }),
       });
       const j = await r.json();
-      pending.textContent = (j.reply || "No response.") + (j.detail ? "\n\n" + j.detail : "");
-      if (j.route) pending.previousSibling.innerHTML = "Assistant" + '<span class="badge">' + j.route + "</span>";
+      pbody.textContent = j.reply || "No response.";
+      if (j.detail) {
+        const dt = document.createElement("div");
+        dt.className = "detail";
+        dt.textContent = j.detail;
+        pbody.appendChild(dt);
+      }
+      if (j.route) {
+        card.querySelector(".who").innerHTML = "Assistant" + '<span class="badge">' + j.route + "</span>";
+      }
     } catch (err) {
-      pending.textContent = "Network error — please try again.";
+      pbody.textContent = "Network error — please try again.";
     } finally {
       btn.disabled = false;
       input.focus();
