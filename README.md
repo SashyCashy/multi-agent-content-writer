@@ -17,38 +17,64 @@ User → Router ───┼→ X/Twitter Writer ↔ tools (loop)
 | `general_handler` | Greetings, questions, conversation recall | none — answers from memory |
 
 <details>
-<summary>Full graph topology (auto-generated from the compiled graph)</summary>
+<summary><b>Architecture block diagram</b> — click to expand</summary>
 
-```mermaid
----
-config:
-  flowchart:
-    curve: linear
----
-graph TD;
-	__start__([<p>__start__</p>]):::first
-	router(router)
-	seo_blog_writer(seo_blog_writer)
-	seo_tools(seo_tools)
-	x_writer(x_writer)
-	x_tools(x_tools)
-	general_handler(general_handler)
-	__end__([<p>__end__</p>]):::last
-	__start__ --> router;
-	router -.-> general_handler;
-	router -.-> seo_blog_writer;
-	router -.-> x_writer;
-	seo_blog_writer -.-> __end__;
-	seo_blog_writer -. &nbsp;tools&nbsp; .-> seo_tools;
-	seo_tools --> seo_blog_writer;
-	x_tools --> x_writer;
-	x_writer -.-> __end__;
-	x_writer -. &nbsp;tools&nbsp; .-> x_tools;
-	general_handler --> __end__;
-	classDef default fill:#f2f0ff,line-height:1.2
-	classDef first fill-opacity:0
-	classDef last fill:#bfb6fc
 ```
+
+                            ┌─────────────────┐
+                            │      USER       │
+                            └────────┬────────┘
+                                     │  text request
+                                     ▼
+                            ┌─────────────────┐
+                            │     main.py     │
+                            │    thread_id    │
+                            └────────┬────────┘
+                                     │  invoke(state, config)
+                                     ▼
+                            ┌─────────────────┐
+              router_llm ──▶│     ROUTER      │
+                            └──┬──────┬─────┬─┘
+             ┌─────────────────┘      │     └─────────────────┐
+             ▼                        ▼                       ▼
+   ┌───────────────────┐    ┌──────────────────┐   ┌───────────────────┐
+   │  SEO BLOG WRITER  │    │     X WRITER     │   │  GENERAL HANDLER  │
+   └─────┬───────▲─────┘    └────┬───────▲─────┘   └─────────┬─────────┘
+         │       │               │       │                   │
+    tool │       │ result   tool │       │ result            │  no tools
+    call │       │          call │       │                   │
+         ▼       │               ▼       │                   │
+   ┌───────────────────┐    ┌──────────────────┐             │
+   │     SEO TOOLS     │    │     X TOOLS      │             │
+   └─────────┬─────────┘    └────────┬─────────┘             │
+             │                       │                       │
+             └───────────┬───────────┘                       │
+                         ▼                                   │
+                ┌─────────────────┐                          │
+                │    tools.py     │                          │
+                │    research     │                          │
+                │    search       │                          │
+                │    count        │                          │
+                └────────┬────────┘                          │
+                         ▼                                   │
+                ┌─────────────────┐                          │
+                │ Tavily / Gemini │                          │
+                └─────────────────┘                          │
+                                                             │
+         ┌───────────────────────────────────────────────────┘
+         │              all paths converge
+         ▼
+   ┌─────────────────┐
+   │     OUTPUT      │────▶ back to USER
+   └─────────────────┘
+
+   ┌───────────────────────────────────────────────────────────────────┐
+   │  MemorySaver  —  snapshots state after every block, per thread_id │
+   │  state.py     —  ContentState shape shared by every block         │
+   └───────────────────────────────────────────────────────────────────┘
+```
+
+Full version with tool access and file dependencies: [`docs/architecture.txt`](docs/architecture.txt)
 
 </details>
 
@@ -92,6 +118,10 @@ What was my last request?
 ---
 
 ## How it works
+
+A step-by-step trace of one request through every function — including the
+tool loop, failure handling, and where memory is restored — is in
+[`docs/FLOW.md`](docs/FLOW.md). The summary below covers the three core ideas.
 
 ### Routing
 
@@ -229,6 +259,15 @@ and re-runnable.
 - **End-to-end** runs the graph, asserts `output` is a `str` and the tweet is ≤280
   characters, then sends a second turn on the same `thread_id` and asserts the reply
   references the earlier request. Persistence as a pass/fail assertion.
+
+---
+
+## Documentation
+
+| File | What it covers |
+|---|---|
+| [`docs/architecture.txt`](docs/architecture.txt) | Block diagram, per-agent tool access, file dependency direction |
+| [`docs/FLOW.md`](docs/FLOW.md) | A request traced end to end, function by function, plus cross-cutting concerns |
 
 ---
 

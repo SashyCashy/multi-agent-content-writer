@@ -1,0 +1,98 @@
+Multi-Agent Content Writer — architecture block diagram
+=======================================================
+
+Arrows show the path a single request takes. The two vertical arrow pairs
+under the writers (tool call going down, result coming back up) are the
+tool-calling loop — each can run several times before the writer stops
+requesting tools and produces its final text.
+
+
+                            ┌─────────────────┐
+                            │      USER       │
+                            └────────┬────────┘
+                                     │  text request
+                                     ▼
+                            ┌─────────────────┐
+                            │     main.py     │
+                            │    thread_id    │
+                            └────────┬────────┘
+                                     │  invoke(state, config)
+                                     ▼
+                            ┌─────────────────┐
+              router_llm ──▶│     ROUTER      │
+                            └──┬──────┬─────┬─┘
+             ┌─────────────────┘      │     └─────────────────┐
+             ▼                        ▼                       ▼
+   ┌───────────────────┐    ┌──────────────────┐   ┌───────────────────┐
+   │  SEO BLOG WRITER  │    │     X WRITER     │   │  GENERAL HANDLER  │
+   └─────┬───────▲─────┘    └────┬───────▲─────┘   └─────────┬─────────┘
+         │       │               │       │                   │
+    tool │       │ result   tool │       │ result            │  no tools
+    call │       │          call │       │                   │
+         ▼       │               ▼       │                   │
+   ┌───────────────────┐    ┌──────────────────┐             │
+   │     SEO TOOLS     │    │     X TOOLS      │             │
+   └─────────┬─────────┘    └────────┬─────────┘             │
+             │                       │                       │
+             └───────────┬───────────┘                       │
+                         ▼                                   │
+                ┌─────────────────┐                          │
+                │    tools.py     │                          │
+                │    research     │                          │
+                │    search       │                          │
+                │    count        │                          │
+                └────────┬────────┘                          │
+                         ▼                                   │
+                ┌─────────────────┐                          │
+                │ Tavily / Gemini │                          │
+                └─────────────────┘                          │
+                                                             │
+         ┌───────────────────────────────────────────────────┘
+         │              all paths converge
+         ▼
+   ┌─────────────────┐
+   │     OUTPUT      │────▶ back to USER
+   └─────────────────┘
+
+   ┌───────────────────────────────────────────────────────────────────┐
+   │  MemorySaver  —  snapshots state after every block, per thread_id │
+   │  state.py     —  ContentState shape shared by every block         │
+   └───────────────────────────────────────────────────────────────────┘
+
+
+Tool access per agent
+---------------------
+
+  SEO BLOG WRITER    research_tool        deep, expensive, 1-2 calls max
+                     internet_search_tool light, cheap, call freely
+
+  X WRITER           internet_search_tool light, cheap, call freely
+                     count_characters     free, local, verifies 280 limit
+
+  GENERAL HANDLER    (none)               answers from conversation history
+
+research_tool is absent from the X writer's tool list, so that agent cannot
+call it at all — the cost boundary is structural, not just a prompt request.
+
+
+File dependency direction
+-------------------------
+
+  main.py      entry point        owns thread_id
+     |
+     v
+  graph.py     wiring             edges + checkpointer
+     |
+     v
+  nodes.py     behaviour          router + 3 agents + loop condition
+     |
+     v
+  tools.py     actions            search backends
+     |
+     v
+  config.py    infrastructure     model clients, keys, logger
+
+  state.py     contracts          sits beside all of it; depends on none
+
+Dependencies only ever point downward. config.py imports nothing from this
+project, which is why swapping the model provider touched only that file.
