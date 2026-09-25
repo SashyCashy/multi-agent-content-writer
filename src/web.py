@@ -45,14 +45,25 @@ class ChatRequest(BaseModel):
     session_id: str = Field(default="", max_length=64)
 
 
-def _is_quota_error(exc: Exception) -> bool:
-    """Detect a Gemini free-tier exhaustion, as opposed to a real bug.
+def _classify_failure(exc: Exception) -> str:
+    """Tell apart the three failure modes a visitor can actually hit.
 
-    The daily cap surfaces as 429 RESOURCE_EXHAUSTED. It is worth telling the
-    visitor plainly, because unlike a rate limit, retrying shortly will not help.
+    These need different messages because the right advice differs:
+
+      "quota"     429 RESOURCE_EXHAUSTED — the daily free cap. Retrying soon
+                  will NOT help; it resets tomorrow.
+      "overload"  503 UNAVAILABLE — the model is busy. Free-tier models,
+                  especially the lite tiers, do this without warning. Retrying
+                  in a minute usually DOES help, and another model may be fine.
+      "error"     anything else: a real bug worth surfacing as a 500.
     """
     text = str(exc)
-    return "RESOURCE_EXHAUSTED" in text or "429" in text or "quota" in text.lower()
+    lower = text.lower()
+    if "RESOURCE_EXHAUSTED" in text or "429" in text or "quota" in lower:
+        return "quota"
+    if "UNAVAILABLE" in text or "503" in text or "high demand" in lower or "overloaded" in lower:
+        return "overload"
+    return "error"
 
 
 @app.get("/health")
@@ -73,7 +84,9 @@ def chat(req: ChatRequest) -> JSONResponse:
             config,
         )
     except Exception as exc:
-        if _is_quota_error(exc):
+        kind = _classify_failure(exc)
+
+        if kind == "quota":
             logger.warning("Gemini quota exhausted: %s", exc)
             return JSONResponse(
                 status_code=429,
@@ -86,6 +99,20 @@ def chat(req: ChatRequest) -> JSONResponse:
                     ),
                 },
             )
+
+        if kind == "overload":
+            logger.warning("Gemini model overloaded: %s", exc)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "overload",
+                    "reply": (
+                        "Google's free-tier model is busy right now (503). This is "
+                        "usually brief — try again in a minute."
+                    ),
+                },
+            )
+
         logger.exception("Graph run failed")
         return JSONResponse(
             status_code=500,

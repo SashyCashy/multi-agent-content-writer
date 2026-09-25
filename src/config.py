@@ -53,13 +53,26 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 # Both models are gemini-3.6-flash: the router uses with_structured_output,
 # which Gemini implements via function calling, so it needs a model with
 # solid tool-calling support — not flash-lite.
-# The free tier caps requests PER MODEL PER DAY (gemini-3.6-flash is only 20),
-# so the router and the writers deliberately run on DIFFERENT models: each
-# gets its own quota pool instead of competing for one. Routing is a trivial
-# classification, so the cheaper lite model loses nothing there.
-# For a final quality run, set WRITER_MODEL=gemini-3.6-flash in .env.
-WRITER_MODEL = os.environ.get("WRITER_MODEL", "gemini-3.5-flash-lite")
+# The free tier caps requests PER MODEL PER DAY, so the router and the writers
+# deliberately run on DIFFERENT models: each gets its own quota pool instead of
+# competing for one. Routing is a trivial classification, so the cheaper lite
+# model loses nothing there.
+#
+# Model choice is also an availability decision, not just a cost one. Free-tier
+# models return 503 UNAVAILABLE ("high demand") without warning, and the lite
+# tiers are hit hardest. If requests start failing, check which models are up
+# before assuming the code broke.
+WRITER_MODEL = os.environ.get("WRITER_MODEL", "gemini-3.6-flash")
 ROUTER_MODEL = os.environ.get("ROUTER_MODEL", "gemini-3.1-flash-lite")
+
+# Timeouts and retry caps matter more than they look. ChatGoogleGenerativeAI
+# defaults to timeout=None and max_retries=6 — so a 503 from an overloaded model
+# is retried six times with backoff and the caller simply hangs, with no error
+# to point at. Bounded here so a sick model surfaces as a fast, readable failure.
+# Worst case stays inside Cloud Run's 300s request timeout:
+#   router  30s x 2 attempts  +  writer  90s x 2 attempts  = 240s
+WRITER_TIMEOUT = int(os.environ.get("WRITER_TIMEOUT", "90"))
+ROUTER_TIMEOUT = int(os.environ.get("ROUTER_TIMEOUT", "30"))
 
 # Built ONLY from an OpenAI key, and left as None without one, so the
 # search-backend check below and the guard in tools.py both work correctly.
@@ -82,6 +95,8 @@ if OPENAI_API_KEY:
 llm = ChatGoogleGenerativeAI(
     model=WRITER_MODEL,
     max_output_tokens=8192,
+    timeout=WRITER_TIMEOUT,
+    max_retries=1,
 )
 
 # Router: a classification task. temperature=0 for stable, repeatable
@@ -89,6 +104,8 @@ llm = ChatGoogleGenerativeAI(
 router_llm = ChatGoogleGenerativeAI(
     model=ROUTER_MODEL,
     max_output_tokens=1024,
+    timeout=ROUTER_TIMEOUT,
+    max_retries=1,
 )
 
 

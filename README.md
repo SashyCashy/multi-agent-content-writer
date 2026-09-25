@@ -209,7 +209,7 @@ lite model loses nothing there.
 
 | Role | Default | Why |
 |---|---|---|
-| Writers | `gemini-3.5-flash-lite` | Its own quota pool |
+| Writers | `gemini-3.6-flash` | Best available quality; own quota pool |
 | Router | `gemini-3.1-flash-lite` | Separate pool; classification needs no more |
 
 Both are overridable from `.env`:
@@ -218,6 +218,14 @@ Both are overridable from `.env`:
 WRITER_MODEL=gemini-3.6-flash    # stronger; noticeably better blog quality
 ROUTER_MODEL=gemini-3.1-flash-lite
 ```
+
+**Free-tier models also return `503 UNAVAILABLE` ("high demand") without warning**,
+and the lite tiers are hit hardest. This is separate from quota and usually clears
+in minutes. Because `ChatGoogleGenerativeAI` defaults to `timeout=None` and
+`max_retries=6`, an unconfigured client retries a 503 six times with backoff and
+simply hangs — so `config.py` sets explicit timeouts and `max_retries=1`, keeping
+the worst case inside Cloud Run's 300s request timeout. If requests start failing,
+check which models are actually up before assuming the code broke.
 
 **The free tier allows ~20 requests per model per day.** A blog post with three tool
 iterations costs about four writer calls, so budget four or five posts per model per
